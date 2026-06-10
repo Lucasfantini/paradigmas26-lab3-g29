@@ -1,9 +1,11 @@
+import org.apache.spark.sql.SparkSession
+
 object Main {
   def main(args: Array[String]): Unit = {
     // Parse command-line arguments
     val cmdArgs = CommandLineArgs.parse(args) match {
       case Some(parsed) => parsed
-      case None => return // scopt prints error messages
+      case None => return
     }
 
     // Load subscriptions
@@ -12,65 +14,102 @@ object Main {
     // Filter out malformed subscriptions (None values)
     val subscriptions = subscriptionOpts.flatten
 
-    // Download feeds and parse posts, tracking success/failure
-    val downloadResults = subscriptions.map { subscription =>
-      val feedOpt = FileIO.downloadFeed(subscription.url)
-      val posts = feedOpt.fold(List[Post]())(JsonParser.parsePosts(_, subscription.name))
-      (feedOpt.isDefined, posts)
+    if (subscriptions.isEmpty) {
+      println("Error: No valid subscriptions found")
+      return
     }
 
-    // Count feed successes/failures
-    val feedsSuccess = downloadResults.count(_._1)
-    val feedsFailed = downloadResults.length - feedsSuccess
+    // Create Spark session
+    val spark = SparkSession.builder()
+      .appName("RedditNER")
+      .master("local[*]")
+      .getOrCreate()
 
-    // Flatten all posts and count JSON parse failures
-    val allPosts = downloadResults.flatMap(_._2)
-    val postsSuccess = allPosts.length
-    val postsFailed = downloadResults.count(_._2.isEmpty)
+    val sc = spark.sparkContext
 
-    // Filter empty posts
-    val filteredPosts = Analyzer.filterEmptyPosts(allPosts)
-    val postsFiltered = allPosts.length - filteredPosts.length
+    // Accumulators para estadísticas
+    val feedsSuccessAcc = sc.longAccumulator("feedsSuccess")
+    val feedsFailedAcc = sc.longAccumulator("feedsFailed")
+    val postsDownloadedAcc = sc.longAccumulator("postsDownloaded")
+    val postsFilteredAcc = sc.longAccumulator("postsFiltered")
 
-    // Calculate average characters in filtered posts
+    // Parallelize subscriptions
+    val subscriptionsRDD = sc.parallelize(subscriptions)
+
+    // Download feeds, parse posts and filter valid posts in parallel
+    val postsRDD = subscriptionsRDD.flatMap { subscription =>
+      try {
+        val feedOpt = FileIO.downloadFeed(subscription.url)
+
+        feedOpt match {
+          case Some(json) =>
+            feedsSuccessAcc.add(1)
+
+            val posts = JsonParser.parsePosts(json, subscription.name)
+            postsDownloadedAcc.add(posts.length)
+
+            val filteredPosts = Analyzer.filterEmptyPosts(posts)
+            postsFilteredAcc.add(posts.length - filteredPosts.length)
+
+            filteredPosts
+
+          case None =>
+            feedsFailedAcc.add(1)
+            println(s"Warning: Failed to download from '${subscription.name}' (${subscription.url})")
+            List.empty[Post]
+        }
+      } catch {
+        case _: Exception =>
+          feedsFailedAcc.add(1)
+          println(s"Warning: Failed to download from '${subscription.name}' (${subscription.url})")
+          List.empty[Post]
+      }
+    }
+
+    // Acción: Spark recién ejecuta el flatMap acá
+    val filteredPosts = postsRDD.collect().toList
+
+    val feedsSuccess = feedsSuccessAcc.value.toInt
+    val feedsFailed = feedsFailedAcc.value.toInt
+    val postsSuccess = postsDownloadedAcc.value.toInt
+    val postsFiltered = postsFilteredAcc.value.toInt
+
     val totalChars = filteredPosts.map(post => post.title.length + post.selftext.length).sum
     val avgChars = if (filteredPosts.nonEmpty) totalChars / filteredPosts.length else 0
 
-    // Prepare statistics
     val stats = Map(
       "feedsSuccess" -> feedsSuccess,
       "feedsFailed" -> feedsFailed,
       "postsSuccess" -> postsSuccess,
-      "postsFailed" -> postsFailed,
+      "postsFailed" -> feedsFailed,
       "postsFiltered" -> postsFiltered,
       "avgChars" -> avgChars
     )
 
-    // Print output
     println(Formatters.formatProcessingStats(stats))
     println()
 
-    // Check if we have any posts to process
     if (filteredPosts.isEmpty) {
       println("Error: No valid posts downloaded after filtering")
+      spark.stop()
       return
     }
 
-    // Load dictionaries
+    // Desde acá sigue igual que antes, todavía secuencial por ahora
     val dictionary = Dictionary.loadAll(cmdArgs.entitiesDir)
 
-    // Detect entities in all posts (combine title and selftext)
     val allEntities = filteredPosts.flatMap { post =>
       val combinedText = post.title + " " + post.selftext
       Analyzer.detectEntities(combinedText, dictionary)
     }
 
-    // Count entities
     val entityCounts = Analyzer.countEntities(allEntities)
     val typeStats = Analyzer.countByType(allEntities)
 
     println(Formatters.formatTypeStats(typeStats))
     println()
     println(Formatters.formatEntityStats(entityCounts, cmdArgs.topK))
+
+    spark.stop()
   }
 }
