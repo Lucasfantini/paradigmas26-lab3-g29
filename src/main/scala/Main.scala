@@ -98,18 +98,27 @@ object Main {
     // Desde acá sigue igual que antes, todavía secuencial por ahora
     val dictionary = Dictionary.loadAll(cmdArgs.entitiesDir)
 
-    val allEntities = filteredPosts.flatMap { post =>
-      val combinedText = post.title + " " + post.selftext
-      Analyzer.detectEntities(combinedText, dictionary)
+    val entitiesRDD = postsRDD.flatMap { post =>
+      val text = post.title + " " + post.selftext
+      Analyzer.detectEntities(text, dictionary)
     }
 
-    val entityCounts = Analyzer.countEntities(allEntities)
-    val typeStats = Analyzer.countByType(allEntities)
+    val entityPairsRDD = entitiesRDD.map { entity =>
+      ((entity.entityType, entity.text), 1)
+    }
 
-    println(Formatters.formatTypeStats(typeStats))
-    println()
-    println(Formatters.formatEntityStats(entityCounts, cmdArgs.topK))
+    val entityCountsRDD = entityPairsRDD.reduceByKey(_ + _)
 
+    val results = entityCountsRDD
+      .collect()
+      .sortBy { case ((entityType, entityName), count) =>
+        (-count, entityType, entityName)
+      }
+
+    results.foreach {
+      case ((entityType, entityName), count) =>
+        println(s"[$entityType] $entityName: $count apariciones")
+    }
     spark.stop()
   }
 }
