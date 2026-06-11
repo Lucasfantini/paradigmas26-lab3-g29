@@ -355,3 +355,56 @@ Tercero, hay que tener cuidado con los efectos secundarios, como hacer `println`
 También conviene que las funciones sean determinísticas, es decir, que para el mismo input produzcan el mismo output. Esto es importante porque Spark puede reintentar tareas si alguna falla.
 
 En el caso de `reduceByKey`, la función de reducción debería ser asociativa y conmutativa. Por ejemplo, la suma `_ + _` sirve porque da lo mismo el orden en que Spark combine los valores. Esto es necesario porque en un entorno distribuido Spark puede combinar resultados parciales en distinto orden.
+
+_____________________________________________________________
+-------------------------------------------------------------
+
+## Ejercicio 3 — Paralelizar el cómputo de entidades nombradas 
+
+### reduceByKey es una barrera de sincronización. ¿Qué ocurre en el cluster en ese punto? ¿Por qué es inevitable para este problema?
+
+Cuando llega al `reduceByKey`, Spark tiene que juntar todas las entidades iguales y contar cuantas veces aparace cada una. Como una misma entidad puede ser encontrada por distintos workers, entonces Spark debe reunir esos resultados antes de seguir. 
+Es inevitable porque si no se juntan los datos, no podemos obtener el conteo final.
+
+### ¿Qué restricciones debe cumplir la función que se le pasa a reduceByKey?
+
+La función tiene que poder combinar los resultados sin depender del orden en que Spark los pase. En nuestro caso, utilizamos una suma `(_ + _)` porque es conmutativa y asociativa y cumple perfecto con lo dicho anteriormente.
+
+### ¿Dónde se hace la lectura del diccionario de entidades?
+
+El diccionario se carga una sola vez con `Dictionary.loadAll(cmdArgs.entitiesDir)`. Despues Spark lo envia a los workers para que puedan usarlo cuando detectan entidades en los post.
+
+
+_____________________________________________________________
+-------------------------------------------------------------
+
+## Ejercicio 4 — Monitoreo del éxito de las tareas
+
+### ¿Por qué los Accumulators solo deben usarse para métricas?
+
+Los Acumuladores son como contadores globales de Spark, entonces cada vez que un worker descarga un feed correctamente el `feedsSuccessAcc.add(1)`aumenta en 1. Pero el problema está en que Spark puede volver a ejecutar una tarea, por ejemplo, si un worker A descarga un fee el acumulador aumenta en 1, pero si la tarea falla por algun motivo, Spark vuelve a ejecutarla y el acumulador vuelve a aumnetar en 1, osea quedaria ahora en 2 aunq solo haya un solo feed. Por este motivo los Acumuladores son utiles solo para monitoreo y no para decisiones lógicas dentro del pipeline.
+
+### ¿En qué momento del pipeline está disponible el valor de un Accumulator?
+
+Despues de ejecutar una acción como `collect()`. Antes de eso Spark aun no procesó los datos y los acumuladores no tienen un valor definido.
+
+### Comparen los tiempos de la versión secuencial y la versión con Spark
+
+La version con Spark fue mas rapida porque las descargas y el procesamiento de los feeds se realizaron en paralelo gracias a los workers. 
+
+_____________________________________________________________
+-------------------------------------------------------------
+
+## Ejercicio 5 — Acceso a datos y estadísticas del resultado
+
+### ¿Qué ocurriría si no llamaran a cache()?
+
+Cada vez que hacemos un `collect()`, Spark debe volver a descargar los feeds y volver a procesar los posts, esto provoca que el programa tarde mas.
+
+### ¿Por qué es incorrecto llamar a collect() entre los pasos (a) y (b) del ejercicio 3?
+
+Porque `collect()` trae todos los datos al driver, si lo hacemos en el medio del pipeline, entonces el resto del procesamiento deja de ser distribuido y pasa a trabajar scala localmente. El resultado es correcto, pero perdemos la ventaja que nos da Spark de repartir el trabajo entre workers.
+
+### ¿En qué momento se almacena realmente el RDD en memoria?
+
+En el momento que se ejecuta la primera accion sobre RDD. Ahi Spark calcula los datos y los guarda en memoria para reutilizarlos. 
