@@ -66,8 +66,15 @@ object Main {
       }
     }
 
-    // Acción: Spark recién ejecuta el flatMap acá
+    // Medicion de descarga y filtrado de posts
+
+    val startPosts = System.currentTimeMillis()
+
     val filteredPosts = postsRDD.collect().toList
+
+    val endPosts = System.currentTimeMillis()
+
+    println(s"Tiempo descarga y filtrado: ${(endPosts - startPosts) / 1000.0} segundos")
 
     val feedsSuccess = feedsSuccessAcc.value.toInt
     val feedsFailed = feedsFailedAcc.value.toInt
@@ -98,23 +105,35 @@ object Main {
     // Desde acá sigue igual que antes, todavía secuencial por ahora
     val dictionary = Dictionary.loadAll(cmdArgs.entitiesDir)
 
+    // Para cada post, extraer sus entidades nombradas y devolver un iterador de NamedEntity.
     val entitiesRDD = postsRDD.flatMap { post =>
       val text = post.title + " " + post.selftext
       Analyzer.detectEntities(text, dictionary)
     }
 
+    // convertir cada NamedEntity en un par (tipo, nombre) como clave y 1 como valor
     val entityPairsRDD = entitiesRDD.map { entity =>
       ((entity.entityType, entity.text), 1)
     }
 
+    //sumar los valores de cada clave para obtener el conteo total por entidad
     val entityCountsRDD = entityPairsRDD.reduceByKey(_ + _)
 
+    // Medicion procesamiento entidades + reduceByKey
+    val startEntities = System.currentTimeMillis()
+
+    // orden descendente por conteo, luego alfabético por tipo y nombre
     val results = entityCountsRDD
       .collect()
       .sortBy { case ((entityType, entityName), count) =>
         (-count, entityType, entityName)
       }
 
+    val endEntities = System.currentTimeMillis()
+
+    println(s"Tiempo procesamiento entidades: ${(endEntities - startEntities) / 1000.0} segundos")
+    
+    // mostrar resultados
     results.foreach {
       case ((entityType, entityName), count) =>
         println(s"[$entityType] $entityName: $count apariciones")
