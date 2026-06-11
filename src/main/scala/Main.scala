@@ -64,7 +64,14 @@ object Main {
           println(s"Warning: Failed to download from '${subscription.name}' (${subscription.url})")
           List.empty[Post]
       }
-    }
+    }.cache() 
+    /* 
+     * Al agregar cache aca, en el primer collec() Spark descarga los feeds
+     * y guarda el resultado en memoria. 
+     * Luego, al volver a usar postsRDD para extraer entidades, 
+     * no vuelve a descargar los feeds sino que lee los posts
+     * desde memoria
+     */
 
     // Medicion de descarga y filtrado de posts
 
@@ -138,6 +145,12 @@ object Main {
       case ((entityType, entityName), count) =>
         println(s"[$entityType] $entityName: $count apariciones")
     }
+    
+    /*
+    * Lo agrego para liberar la memoria ocupada por los posts descargados
+    */
+    postsRDD.unpersist()
+
     spark.stop()
   }
 }
