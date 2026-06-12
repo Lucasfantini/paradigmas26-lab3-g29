@@ -1,0 +1,8 @@
+target/
+project/target/
+.metals/
+.vscode/
+._*
+*:Zone.Identifier
+*.class
+*.jar
