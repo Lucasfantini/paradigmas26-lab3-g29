@@ -1,4 +1,14 @@
+import java.io.File
+
 object Dictionary {
+
+  private val entityFiles = List(
+    ("people.txt", "Person"),
+    ("universities.txt", "University"),
+    ("languages.txt", "ProgrammingLanguage"),
+    ("organizations.txt", "Organization"),
+    ("places.txt", "Place")
+  )
 
   /**
    * Load entities from a dictionary file and create instances of the specified type.
@@ -16,7 +26,7 @@ object Dictionary {
           case "Place"               => new Place(name)
           case "Technology"          => new Technology(name)
           case "ProgrammingLanguage" => new ProgrammingLanguage(name)
-          case _                     => new Person(name) // fallback
+          case _                     => new Person(name)
         }
       }
     }
@@ -29,23 +39,22 @@ object Dictionary {
    * @return combined list of all entities from all successfully loaded dictionaries
    */
   def loadAll(entitiesDir: String): List[NamedEntity] = {
-    // Check if entities directory exists
-    val dataDir = new java.io.File(entitiesDir)
+    val dataDir = new File(entitiesDir)
 
-    val peopleOpt = loadFromFile(s"$entitiesDir/people.txt", "Person")
+    if (!dataDir.exists() || !dataDir.isDirectory) {
+      println(s"Error: entities directory '$entitiesDir' not found")
+      List.empty
+    } else {
+      entityFiles.flatMap { case (fileName, entityType) =>
+        val filePath = s"$entitiesDir/$fileName"
 
-    val universitiesOpt = loadFromFile(s"$entitiesDir/universities.txt", "University")
-
-    val languagesOpt = loadFromFile(s"$entitiesDir/languages.txt", "ProgrammingLanguage")
-
-    val organizationsOpt = loadFromFile(s"$entitiesDir/organizations.txt", "Organization")
-
-    val placesOpt = loadFromFile(s"$entitiesDir/places.txt", "Place")
-
-    peopleOpt.getOrElse(List()) :::
-      universitiesOpt.getOrElse(List()) :::
-      languagesOpt.getOrElse(List()) :::
-      organizationsOpt.getOrElse(List()) :::
-      placesOpt.getOrElse(List())
+        loadFromFile(filePath, entityType) match {
+          case Some(entities) => entities
+          case None =>
+            println(s"Warning: Could not load $filePath")
+            List.empty[NamedEntity]
+        }
+      }
+    }
   }
 }

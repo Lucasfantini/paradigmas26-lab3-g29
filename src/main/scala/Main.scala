@@ -45,7 +45,7 @@ object Main {
           case Some(json) =>
             feedsSuccessAcc.add(1)
 
-            val posts = JsonParser.parsePosts(json, subscription.name)
+            val posts = JsonParser.parsePosts(json, subscription)
             postsDownloadedAcc.add(posts.length)
 
             val filteredPosts = Analyzer.filterEmptyPosts(posts)
@@ -105,6 +105,7 @@ object Main {
 
     if (filteredPosts.isEmpty) {
       println("Error: No valid posts downloaded after filtering")
+      postsRDD.unpersist()
       spark.stop()
       return
     }
