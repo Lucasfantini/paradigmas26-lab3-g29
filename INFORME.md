@@ -390,7 +390,23 @@ Despues de ejecutar una acción como `collect()`. Antes de eso Spark aun no proc
 
 ### Comparen los tiempos de la versión secuencial y la versión con Spark
 
-La version con Spark fue mas rapida porque las descargas y el procesamiento de los feeds se realizaron en paralelo gracias a los workers. 
+Para la medición con Spark se usó el mock local de Reddit en `http://localhost:8123` y se ejecutó el programa con:
+
+```bash
+sbt "run --subscription-file data/valid_subscriptions.json --entities-dir data/valid_entities --top-k 10" | grep "Tiempo"
+```
+
+Los tiempos obtenidos fueron:
+
+| Versión | Descarga y filtrado | Procesamiento de entidades | Total interno aproximado |
+|---|---:|---:|---:|
+| Spark `local[*]` | 5.791 s | 0.485 s | 6.276 s |
+
+![Tiempos de ejecución con Spark](docs/evidencias/tiempos_spark_mock.png)
+
+El tiempo total informado por `sbt` puede ser mayor porque incluye el arranque de sbt, la creación de la `SparkSession`, la inicialización de Spark y el cierre del proceso. Para comparar el pipeline nos enfocamos en los tiempos medidos dentro del programa con `System.currentTimeMillis()`.
+
+Queda pendiente completar la comparación con la versión secuencial del esqueleto original. Para la cantidad chica de datos del mock, parte del tiempo de Spark corresponde a inicialización, por lo que la diferencia puede no ser tan grande como en un conjunto de feeds más grande.
 
 _____________________________________________________________
 -------------------------------------------------------------
